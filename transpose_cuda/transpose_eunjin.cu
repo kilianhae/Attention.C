@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/time.h>
+#include <cublas_v2.h>
 
 #define TILE_DIM 32
 #define BLOCK_ROWS 8
@@ -122,10 +123,52 @@ __global__ void transposeSharedMem(float *d_A, float *d_T, int M, int N) {
 }
 
 
+
+
+void run_transpose_cublas(float *A, float *C, int M,int N) {
+    cudaError_t cudaStat;  // cudaMalloc status
+    cublasStatus_t stat;  // cuBLAS functions status
+    cublasHandle_t handle;
+    stat = cublasCreate(&handle);
+
+    const float alpha = 1.0;
+    const float beta = 0.0;
+
+    // loop over batchsize and head
+    for (int i = 0; i < 1; i++) {
+        for (int j = 0; j < 1; j++) {
+            // get the i-th batch and j-th head
+            float* Aij = A;
+            float* Cij = C;
+
+            // perform matrix transposition using cublasSgeam
+            stat = cublasSgeam(handle,
+                               CUBLAS_OP_T,  // transpose A
+                               CUBLAS_OP_N,  // do not transpose B (NULL)
+                               N,  // number of rows of A^T
+                               M,  // number of columns of A^T
+                               &alpha,
+                               Aij,  // pointer to A
+                               N,  // leading dimension of A
+                               &beta,
+                               NULL,  // B is NULL
+                               N,  // set ldb to a valid value
+                               Cij,  // pointer to C
+                               N);  // leading dimension of C
+        }
+    }
+    cublasDestroy(handle);
+}
+
+
+
+
 int main(int argc, char *argv[]) {
     // Set matrix size
-    int M = atoi(argv[1]);
-    int N = atoi(argv[2]);
+    // int M = atoi(argv[1]);
+    // int N = atoi(argv[2]);
+    int M = 4096;
+    int N = 64;
     if (M <= 0 || N <= 0) return 0;
     size_t bytes = M * N * sizeof(float);
 
@@ -149,26 +192,29 @@ int main(int argc, char *argv[]) {
     
 
 	// copy host data to device
-    double start_total_GPU = timeStamp();
+    
 	gpuErrchk(cudaMemcpy(d_A, h_A, bytes, cudaMemcpyHostToDevice));
 
     
 	// launch kernel instance
 	dim3 blockDim(BLOCK_DIM, BLOCK_DIM);
 	dim3 gridDim((N + blockDim.x - 1)/blockDim.x, (M + blockDim.y - 1)/blockDim.y);
-	// transposeNaive<<<gridDim, blockDim>>>(d_A, d_T, M, N);
-	transposeSharedMem<<<gridDim, blockDim>>>(d_A, d_T, M, N);
+
+    double start_total_GPU = timeStamp();
+	//transposeNaive<<<gridDim, blockDim>>>(d_A, d_T, M, N);
+	//transposeSharedMem<<<gridDim, blockDim>>>(d_A, d_T, M, N);
+    run_transpose_cublas(d_A, d_T, M, N);
     
     cudaDeviceSynchronize();
     gpuErrchk(cudaGetLastError());
 
+    double end_total_GPU = timeStamp();
+    float total_GPU_time = end_total_GPU - start_total_GPU;
 
 	// copy result back to host
 	gpuErrchk(cudaMemcpy(h_T, d_T, bytes, cudaMemcpyDeviceToHost));
 
 
-    double end_total_GPU = timeStamp();
-    float total_GPU_time = end_total_GPU - start_total_GPU;
     printf("GPU execution time: %.4f milliseconds\n", total_GPU_time);
 
   	// display results

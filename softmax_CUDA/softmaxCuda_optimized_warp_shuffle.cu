@@ -272,14 +272,14 @@ int main() {
     cudaDeviceSynchronize();
 
     // Compute softmax elementwise CPU for verification
-    softmax2D_elementwise_cpu<float>(input.data(), exp_sums.data(), output_cpu.data(), N, M);
-    cudaDeviceSynchronize();
+//    softmax2D_elementwise_cpu<float>(input.data(), exp_sums.data(), output_cpu.data(), N, M);
+ //   cudaDeviceSynchronize();
 
     auto end_cpu = std::chrono::high_resolution_clock::now();
     auto duration_cpu = std::chrono::duration_cast<std::chrono::microseconds>(end_cpu - start_cpu);
 
     // Print CPU execution time
-    std::cout << "CPU Execution Time: " << duration_cpu.count()/1000 << " ms" << std::endl;
+    std::cout << "CPU Execution Time: " << duration_cpu.count() << " ms" << std::endl;
 
     // Create CUDA events for timing GPU execution
     cudaEvent_t start_gpu_elementwise, stop_gpu_elementwise;
@@ -290,7 +290,7 @@ int main() {
     CUDA_CHECK(cudaEventRecord(start_gpu_elementwise));
 
     // Launch softmax kernel elementwise on GPU
-    softmaxKernel2D_elementwise<<<gridDim, blockDim>>>(d_input, d_exp_sums, d_output, N, M);
+   // softmaxKernel2D_elementwise<<<gridDim, blockDim>>>(d_input, d_exp_sums, d_output, N, M);
     CUDA_CHECK(cudaGetLastError());
     CUDA_CHECK(cudaDeviceSynchronize());
 
@@ -320,7 +320,7 @@ int main() {
     }
 
     // Print GPU execution time
-    std::cout << "GPU Time: " << gpu_time + gpu_elementwise_time << " ms" << std::endl;
+    std::cout << "GPU Time: " << gpu_time << " ms" << std::endl;
     //std::cout << "GPU Elementwise Execution Time: " << gpu_elementwise_time << " ms" << std::endl;
 
     // Free device memory

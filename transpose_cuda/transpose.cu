@@ -115,7 +115,7 @@ __global__ void transposeSharedMem(float *d_A, float *d_T, int M, int N) {
 	}
 }
 
-__global__ void copySharedMem(float *idata, float *odata, int M, int N)
+__global__ void copySharedMem(float *d_A, float *d_T, int M, int N)
 {
   __shared__ float tile[TILE_DIM * TILE_DIM];
     // block is 8 x 32 so x is 8 and y is 32
@@ -128,7 +128,7 @@ __global__ void copySharedMem(float *idata, float *odata, int M, int N)
     if (x>=N || y>=M){return;}
     // load all your elements into shared memory
     for (int j=0; j<4;j+=1){
-        tile[threadIdx.y*TILE_DIM+threadIdx.x*4+j]=idata[y*N+x+j]; //thread 0: 0,1,2,3, thread 1: 4,5,6,7 ... ,28,29,30,31, loading is done with offset
+        tile[threadIdx.y*TILE_DIM+threadIdx.x*4+j]=d_A[y*N+x+j]; //thread 0: 0,1,2,3, thread 1: 4,5,6,7 ... ,28,29,30,31, loading is done with offset
     }
     
     __syncthreads();
@@ -141,12 +141,12 @@ __global__ void copySharedMem(float *idata, float *odata, int M, int N)
 
     for (int j = 0; j < 4; j += 1){
         idx=(threadIdx.x*4+j); // 
-        odata[blockIdx.x*TILE_DIM*N + blockIdx.y*TILE_DIM + idy*M + idx]=tile[idx*TILE_DIM+idy];
+        d_T[blockIdx.x*TILE_DIM*N + blockIdx.y*TILE_DIM + idy*M + idx]=tile[idx*TILE_DIM+idy];
     }}
 
 
 
-__global__ void copySharedMem_coalesced(float *idata, float *odata, int M, int N)
+__global__ void copySharedMem_coalesced(float *d_A, float *d_T, int M, int N)
 {
   __shared__ float tile[TILE_DIM * TILE_DIM];
     // block is 8 x 32 so x is 8 and y is 32
@@ -159,7 +159,7 @@ __global__ void copySharedMem_coalesced(float *idata, float *odata, int M, int N
     if (x>=N || y>=M){return;}
     // load all your elements into shared memory
     for (int j=threadIdx.y; j<TILE_DIM+threadIdx.y;j+=BLOCK_ROWS){
-        tile[j*TILE_DIM+threadIdx.x]=idata[(y+j)*N+x]; //thread 0: 0,1,2,3, thread 1: 4,5,6,7 ... ,28,29,30,31, loading is done with offset
+        tile[j*TILE_DIM+threadIdx.x]=d_A[(y+j)*N+x]; //thread 0: 0,1,2,3, thread 1: 4,5,6,7 ... ,28,29,30,31, loading is done with offset
     }
     
     __syncthreads();
@@ -172,7 +172,7 @@ __global__ void copySharedMem_coalesced(float *idata, float *odata, int M, int N
     int xx = blockIdx.x*TILE_DIM*N;
     int yy = blockIdx.y*TILE_DIM;
     for (int j = threadIdx.y; j < TILE_DIM+threadIdx.y; j += BLOCK_ROWS){
-        odata[xx + yy + j*M + threadIdx.x]=tile[ix+j];
+        d_T[xx + yy + j*M + threadIdx.x]=tile[ix+j];
     }
 
 }
@@ -197,16 +197,16 @@ void run_transpose_cublas(torch::Tensor A, torch::Tensor C) {
             stat = cublasSgeam(handle,
                                CUBLAS_OP_T,  // transpose A
                                CUBLAS_OP_N,  // do not transpose B (NULL)
-                               Aij.size(1),  // number of rows of A^T
-                               Aij.size(0),  // number of columns of A^T
+                               Aij.size(0),  // number of rows of A^T
+                               Aij.size(1),  // number of columns of A^T
                                &alpha,
                                Aij.data_ptr<float>(),  // pointer to A
-                               Aij.size(1),  // leading dimension of A
+                               Aij.size(0),  // leading dimension of A
                                &beta,
                                NULL,  // B is NULL
-                               Aij.size(1),  // set ldb to a valid value
+                               Aij.size(0),  // set ldb to a valid value
                                Cij.data_ptr<float>(),  // pointer to C
-                               Aij.size(1));  // leading dimension of C
+                               Cij.size(1));  // leading dimension of C
         }
     }
 
@@ -214,17 +214,17 @@ void run_transpose_cublas(torch::Tensor A, torch::Tensor C) {
 }
 
 
-void run_copySharedMem_coalesced(float *idata, float *odata, int M, int N){
+void run_copySharedMem_coalesced(float *d_A, float *d_T, int M, int N){
     dim3 blockDim(8,32); // each thread will process 4 cosnecutive 
 	dim3 gridDim((N + 32 - 1)/32, (M + 32 - 1)/32);
-    copySharedMem_coalesced<<<gridDim, blockDim>>>(A_data, C_data, M, N);
+    copySharedMem_coalesced<<<gridDim, blockDim>>>(d_A, d_T, M, N);
 }
 
 
-void run_copySharedMem(float *idata, float *odata, int M, int N){
+void run_copySharedMem(float *d_A, float *d_T, int M, int N){
     dim3 blockDim(32,8); // each thread will process 4 cosnecutive 
 	dim3 gridDim((N + 32 - 1)/32, (M + 32 - 1)/32);
-    copySharedMem<<<gridDim, blockDim>>>(A_data, C_data, M, N);
+    copySharedMem<<<gridDim, blockDim>>>(d_A, d_T, M, N);
 }
 
 
@@ -250,10 +250,10 @@ torch::Tensor forward(torch::Tensor A) {
 	dim3 gridDim((N + BLOCK_DIM - 1)/BLOCK_DIM, (M + BLOCK_DIM - 1)/BLOCK_DIM);
 
    
-    //transposeCoalesced<<<gridDim, blockDim>>>(A_data, C_data, M, N);
-    transposeSharedMem<<<gridDim, blockDim>>>(A_data, C_data, M, N);
+    //transposeNaive<<<gridDim, blockDim>>>(A_data, C_data, M, N);
+    //transposeSharedMem<<<gridDim, blockDim>>>(A_data, C_data, M, N);
     //copySharedMem<<<gridDim, blockDim>>>(A_data, C_data, M, N);
-    //run_transpose_cublas(A, C);
+    run_transpose_cublas(A, C);
     cudaDeviceSynchronize();
     end = timeStamp();
 

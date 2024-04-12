@@ -10,8 +10,8 @@ minimal_transpose = load(name='transpose', sources=['main.cpp', 'transpose.cu'],
 # Use small model params, otherwise slower than manual attention. See caveats in README.
 batch_size = 1
 n_head = 1
-seq_len = 4000
-head_embd = 4000
+seq_len = 4096
+head_embd = 64
 # seq_len = 64 # M
 # head_embd = 64 # N
 
@@ -26,7 +26,7 @@ def manual_transpose(q):
 manual_result = manual_transpose(q)
 
 # with torch.autograd.profiler.profile(use_cuda=True) as prof:
-    # manual_result = manual_transpose(q)
+# manual_result = manual_transpose(q)
 # print(prof.key_averages().table(sort_by='cuda_time_total', row_limit=10))
 
 print('=== profiling minimal transpose === ')

@@ -171,7 +171,6 @@ __global__ void sgemm_naive_coalesced_tiled(int M, int N, int K, float *A,
         else{
             Bs[ty][tx] = 0;
         }
-        
         __syncthreads();
         for(int j=0;j<blocksize;j++) {
             val += As[ty][j]*Bs[j][tx];
@@ -187,11 +186,7 @@ __global__ void sgemm_naive_coalesced_tiled(int M, int N, int K, float *A,
 __global__ void sgemm_naive_coalesced_tiled_batched(int L, int M, int N, int K, float *A,
                             float *B, float *C) {
     // assign smem
-    __shared__ float As[tilesize][tilesize];
-    __shared__ float Bs[tilesize][tilesize];
-
     
-
     // this kernel uses x as the col index and y as the row index (which leads to better coalescing) and a decent speedup
     // compute position in C that this thread is responsible for
     const uint x = blockIdx.x * blockDim.x + threadIdx.x;
@@ -201,6 +196,7 @@ __global__ void sgemm_naive_coalesced_tiled_batched(int L, int M, int N, int K, 
     const uint offset_A = batch * M * K;
     const uint offset_B = batch * K * N;
     const uint offset_C = batch * M * N;
+    
 
     if (batch >= L) {
       return;
@@ -211,6 +207,10 @@ __global__ void sgemm_naive_coalesced_tiled_batched(int L, int M, int N, int K, 
 
     const uint blocksize=blockDim.x;
 
+    assert(blocksize == tilesize);
+
+    __shared__ float As[tilesize][tilesize];
+    __shared__ float Bs[tilesize][tilesize];
     
     float val = 0.0;
     // loop over phases of tiling 
@@ -643,7 +643,12 @@ void run_sgemm_cublas_batched(torch::Tensor A, torch::Tensor B, torch::Tensor C,
     cudaMemcpy(Carray_d, Carray, A.size(0)*A.size(1)*sizeof(float*), cudaMemcpyHostToDevice);
     if(transpose){
       //stat = cublasSgemmBatched(handle, CUBLAS_OP_T, CUBLAS_OP_N, 3000, 3000, 4000, &alpha, Barray_d, 4000, Aarray_d, 4000, &beta, Carray_d, 3000, B.size(0)*B.size(1));
+      double start, end;
+      start = getTimeStamp();
+      cudaDeviceSynchronize();
       stat = cublasSgemmBatched(handle, CUBLAS_OP_T, CUBLAS_OP_N, B.size(2), A.size(2), B.size(3), &alpha, Barray_d, B.size(3) , Aarray_d, A.size(3), &beta, Carray_d, B.size(2), B.size(0)*B.size(1));
+      cudaDeviceSynchronize();
+      end = getTimeStamp();
     }
     else{
     stat = cublasSgemmBatched(handle, CUBLAS_OP_N, CUBLAS_OP_N, B.size(3), A.size(2), B.size(2), &alpha, Barray_d, B.size(3), Aarray_d, A.size(3), &beta, Carray_d, B.size(3), B.size(0)*B.size(1));
@@ -746,7 +751,7 @@ void run_sgemm_blocktiling(torch::Tensor A, torch::Tensor B, torch::Tensor C){
             torch::Tensor Bij = B[i][j];
             torch::Tensor Cij = C[i][j];
             // compute the matrix multiplication
-            sgemm_naive_coalesced<<<gridDim, blockDim>>>(A.size(2), B.size(3), A.size(3), Aij.data_ptr<float>(), Bij.data_ptr<float>(), Cij.data_ptr<float>());
+            sgemm2DBlocktiling<<<gridDim, blockDim>>>(A.size(2), B.size(3), A.size(3), Aij.data_ptr<float>(), Bij.data_ptr<float>(), Cij.data_ptr<float>());
             // allocate memory for output on GPU in cuda
         }
     }
@@ -757,7 +762,14 @@ void run_sgemm_blocktiling_batched(torch::Tensor A, torch::Tensor B, torch::Tens
     dim3 gridDim(CEIL_DIV(B.size(3), BN), CEIL_DIV(A.size(2), BM), CEIL_DIV(A.size(0)*A.size(1),BD));
     dim3 blockDim((BM * BN)/(TM * TN), BD);
     int L = A.size(0)*A.size(1);
+
+    double start, end;
+    start = getTimeStamp();
+
     sgemm2DBlocktiling_batched<<<gridDim, blockDim>>>(L, A.size(2), B.size(3), A.size(3), A.data_ptr<float>(), B.data_ptr<float>(), C.data_ptr<float>());
+    cudaDeviceSynchronize();
+    end = getTimeStamp();
+    printf("Time taken short: %lf\n", (end-start));
     return;
     }
 
@@ -770,7 +782,9 @@ torch::Tensor forward(torch::Tensor A, torch::Tensor B, bool transpose) {
     if (transpose){
       C = torch::zeros({A.size(0), A.size(1), A.size(2), B.size(2)}, torch::kCUDA);
     }
-    else {C = torch::zeros({A.size(0), A.size(1), A.size(2), B.size(3)}, torch::kCUDA);}
+    else {
+      C = torch::zeros({A.size(0), A.size(1), A.size(2), B.size(3)}, torch::kCUDA);
+      }
     
 
 

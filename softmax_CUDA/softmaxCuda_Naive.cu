@@ -42,8 +42,8 @@ void softmax_cpu(float *input, float *output, int rows, int cols) {
 }
 
 int main() {
-    const int rows = 4096; // Example: large number of rows
-    const int cols = 4096;  // Example: large number of columns
+    const int rows = 8192; // Example: large number of rows
+    const int cols = 8192;  // Example: large number of columns
 
     // Allocate memory on host
     float *input_host = (float*)malloc(rows * cols * sizeof(float));

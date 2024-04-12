@@ -1,4 +1,4 @@
-#include <torch/types.h>
+//#include <torch/types.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <cuda.h>
@@ -13,9 +13,11 @@
 #include <cstdlib>
 #include <cublas_v2.h>
 #include <cuda_runtime.h>
-#include <cudnn.h>
+// #include <cudnn.h>
 
 #define CEIL_DIV(M, N) (((M) + (N)-1) / (N))
+#define H 8
+#define BB 1
 
 //Optimized
 const int TILE_DIM_Y = 32;  // Tile dimension for rows
@@ -198,25 +200,29 @@ void softmax_cudnn(float *input, float *output, int num_samples, int num_classes
     cudnnDestroy(cudnn);
 }
 
-void run_softmax_naive(torch::Tensor A, torch::Tensor C){
-    const int seq_len = A.size(2);
-    const int head_embd = A.size(3);
-    const int M = seq_len;
-    const int N = head_embd;
+void run_softmax_naive(float* A, float* C, int M, int N){
+    //const int seq_len = A.size(2);
+    //const int head_embd = A.size(3);
+    //const int M = seq_len;
+    //const int N = head_embd;
     int threadsPerBlock = 256;
     dim3 blockDim(threadsPerBlock);
     dim3 gridDim(ceil((M + blockDim.x - 1) / (float)blockDim.x), ceil((N + blockDim.y - 1) / (float)blockDim.y));
 
     // loop over batchsize and head
-    for (int i = 0; i < A.size(0); i++) {
-        for (int j = 0; j < A.size(1); j++) {
+    for (int i = 0; i < BB; i++) {
+        for (int j = 0; j <H); j++) {
             // get the i-th batch and j-th head
-            torch::Tensor Aij = A[i][j];
-            torch::Tensor Cij = C[i][j];
+
+		float* Cij = &C[i*H*K*N+j*K*N]
+		float* Aij = &A[i*H*K*N+j*K*N]
+
+//            torch::Tensor Aij = A[i][j];
+//            torch::Tensor Cij = C[i][j];
             // compute the softmax
 
 
-            softmax_kernel_naive<<<gridDim, blockDim>>>(Aij.data_ptr<float>(), Cij.data_ptr<float>(), M, N);
+            softmax_kernel_naive<<<gridDim, blockDim>>>(Aij, Cij, M, N);
 
         }
     }
@@ -242,7 +248,7 @@ void run_softmax_batched_naive(torch::Tensor A, torch::Tensor C){
 
 
 }
-
+/*
 void run_softmax_cuDNN(torch::Tensor A, torch::Tensor C){
     const int seq_len = A.size(2);
     const int head_embd = A.size(3);
@@ -253,8 +259,8 @@ void run_softmax_cuDNN(torch::Tensor A, torch::Tensor C){
     dim3 gridDim(ceil((M + blockDim.x - 1) / (float)blockDim.x), ceil((N + blockDim.y - 1) / (float)blockDim.y));
 
     // loop over batchsize and head
-    for (int i = 0; i < A.size(0); i++) {
-        for (int j = 0; j < A.size(1); j++) {
+    for (int i = 0; i < BB; i++) {
+        for (int j = 0; j < H; j++) {
             // get the i-th batch and j-th head
             torch::Tensor Aij = A[i][j];
             torch::Tensor Cij = C[i][j];
@@ -269,7 +275,7 @@ void run_softmax_cuDNN(torch::Tensor A, torch::Tensor C){
     }
 
 }
-
+*/
 
 void run_softmax_thread_coarse(torch::Tensor A, torch::Tensor C){
     const int seq_len = A.size(2);
@@ -325,6 +331,7 @@ void run_softmax_optimized(torch::Tensor A, torch::Tensor C){
 
 /*************************************************************************** Invocations*********************************************************/
 
+/*
 torch::Tensor forward(torch::Tensor A) {
     const int batch_size = A.size(0);
     const int n_head = A.size(1);
@@ -348,3 +355,40 @@ torch::Tensor forward(torch::Tensor A) {
 }
 
 
+*/
+
+int main(){
+int M = 4096; // number of rows in dataset
+    int N = 4096; 
+    std::vector<float> A(BB * H * N * K,1.0);
+    std::vector<float> C(BB * H * N * M,1.0);
+    float *d_A, *d_C;
+
+    cudaMalloc(&d_A, BB * H * M * N * sizeof(float));
+    cudaMalloc(&d_C, BB * H * M * N * sizeof(float));
+    cudaMemset(d_C, 0, N*sizeof(float));
+
+    cudaMemcpy(d_A,  A.data(),  BB * H * M * N * sizeof(float), cudaMemcpyHostToDevice);
+   
+    cudaDeviceSynchronize();
+
+
+    double start, end;
+    start = getTimeStamp();
+    run_softmax_naive(d_A,d_C,M,N);
+    
+    cudaDeviceSynchronize();
+    end = getTimeStamp();
+    std::cout << "Time taken kernel: " << end - start << std::endl;
+
+
+    cudaMemcpy(C.data(),d_C, BB * H * N * M * sizeof(float), cudaMemcpyDeviceToHost);
+    cudaDeviceSynchronize();
+    cudaFree(d_A);
+    cudaFree(d_C);
+
+
+    return 0;
+
+
+}
