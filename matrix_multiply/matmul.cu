@@ -651,8 +651,12 @@ void run_sgemm_cublas_batched(torch::Tensor A, torch::Tensor B, torch::Tensor C,
       end = getTimeStamp();
     }
     else{
+      double start, end;
+      start = getTimeStamp();
+      cudaDeviceSynchronize();
     stat = cublasSgemmBatched(handle, CUBLAS_OP_N, CUBLAS_OP_N, B.size(3), A.size(2), B.size(2), &alpha, Barray_d, B.size(3), Aarray_d, A.size(3), &beta, Carray_d, B.size(3), B.size(0)*B.size(1));
-    }
+    cudaDeviceSynchronize();
+      end = getTimeStamp();}
 }
 
 void run_sgemm_naive(torch::Tensor A, torch::Tensor B, torch::Tensor C){
@@ -802,7 +806,7 @@ torch::Tensor forward(torch::Tensor A, torch::Tensor B, bool transpose) {
     // streaming not really beneficial probably as we dont have any data loading happening
     
     //run_sgemm_blocktiling_batched(A, B, C);
-    run_sgemm_cublas(A, B, C, transpose);
+    run_sgemm_cublas_batched(A, B, C, transpose);
     cudaDeviceSynchronize();
     end = getTimeStamp();
     printf("Time taken: %lf\n", (end-start));
