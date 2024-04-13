@@ -1,7 +1,9 @@
 #include <iostream>
 #include <cmath>
 #include <cstdlib>
-
+#include <chrono>
+#include <cuda.h>
+#include <cuda_runtime.h>
 // Kernel declaration
 __global__ void softmax_kernel_naive(float *input, float *output, int rows, int cols) {
     int idx = threadIdx.x + blockIdx.x * blockDim.x;
@@ -41,20 +43,9 @@ void softmax_cpu(float *input, float *output, int rows, int cols) {
     }
 }
 
-<<<<<<< HEAD
 int main() {
     const int rows = 8192; // Example: large number of rows
     const int cols = 8192;  // Example: large number of columns
-=======
-int main(int argc, char *argv[]) {
-    // Parse command-line arguments
-    if (argc != 3) {
-        std::cerr << "Usage: " << argv[0] << " <rows> <cols>" << std::endl;
-        return 1;
-    }
-    const int rows = std::stoi(argv[1]);
-    const int cols = std::stoi(argv[2]);
->>>>>>> b78385d6770a9bef40d7ea46acdc7ed3fa8f7cd3
 
     // Allocate memory on host
     float *input_host = (float*)malloc(rows * cols * sizeof(float));

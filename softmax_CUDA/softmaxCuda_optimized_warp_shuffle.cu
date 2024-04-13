@@ -96,12 +96,12 @@ do { \
 
 int main(int argc, char *argv[]) {
     // Parse command-line arguments
-    if (argc != 3) {
-        std::cerr << "Usage: " << argv[0] << " <num_rows> <num_cols>" << std::endl;
-        return 1;
-    }
-    const int N = std::stoi(argv[1]);
-    const int M = std::stoi(argv[2]);
+//    if (argc != 3) {
+  //      std::cerr << "Usage: " << argv[0] << " <num_rows> <num_cols>" << std::endl;
+    //    return 1;
+   // }
+    const int N = 8192;//std::stoi(argv[1]);
+    const int M = 8192;//std::stoi(argv[2]);
 
     // Generate random input
     std::vector<float> input(N * M);
@@ -159,23 +159,14 @@ int main(int argc, char *argv[]) {
     cudaDeviceSynchronize();
 
     // Compute softmax elementwise CPU for verification
-<<<<<<< HEAD
-//    softmax2D_elementwise_cpu<float>(input.data(), exp_sums.data(), output_cpu.data(), N, M);
- //   cudaDeviceSynchronize();
-=======
     //softmax2D_elementwise_cpu<float>(input.data(), exp_sums.data(), output_cpu.data(), N, M);
     cudaDeviceSynchronize();
->>>>>>> b78385d6770a9bef40d7ea46acdc7ed3fa8f7cd3
 
     auto end_cpu = std::chrono::high_resolution_clock::now();
     auto duration_cpu = std::chrono::duration_cast<std::chrono::microseconds>(end_cpu - start_cpu);
 
     // Print CPU execution time
-<<<<<<< HEAD
     std::cout << "CPU Execution Time: " << duration_cpu.count() << " ms" << std::endl;
-=======
-    std::cout << "CPU Execution Time: " << duration_cpu.count() / 1000 << " ms" << std::endl;
->>>>>>> b78385d6770a9bef40d7ea46acdc7ed3fa8f7cd3
 
     // Create CUDA events for timing GPU execution
     cudaEvent_t start_gpu_elementwise, stop_gpu_elementwise;
@@ -186,11 +177,7 @@ int main(int argc, char *argv[]) {
     CUDA_CHECK(cudaEventRecord(start_gpu_elementwise));
 
     // Launch softmax kernel elementwise on GPU
-<<<<<<< HEAD
    // softmaxKernel2D_elementwise<<<gridDim, blockDim>>>(d_input, d_exp_sums, d_output, N, M);
-=======
-    //softmaxKernel2D_elementwise<<<gridDim, blockDim>>>(d_input, d_exp_sums, d_output, N, M);
->>>>>>> b78385d6770a9bef40d7ea46acdc7ed3fa8f7cd3
     CUDA_CHECK(cudaGetLastError());
     CUDA_CHECK(cudaDeviceSynchronize());
 

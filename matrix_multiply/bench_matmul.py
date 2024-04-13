@@ -14,7 +14,7 @@ minimal_matmul = load(name='matmul', sources=['main.cpp', 'matmul.cu'], extra_cu
 # head_embd = 64
 batch_size = 1
 n_head = 8
-seq_len = 4096
+seq_len = 8192
 head_embd = 64
 torch.cuda.empty_cache()
 
@@ -41,9 +41,9 @@ print(prof.key_averages().table(sort_by='cuda_time_total', row_limit=10))
 
 print('=== profiling minimal flash attention === ')
 
-with torch.autograd.profiler.profile(use_cuda=True) as prof:
-    minimal_matmul = minimal_matmul.forward(q, k, False)
-print(prof.key_averages().table(sort_by='cuda_time_total', row_limit=10))
+# with torch.autograd.profiler.profile(use_cuda=True) as prof:
+minimal_matmul = minimal_matmul.forward(q, k, False)
+#print(prof.key_averages().table(sort_by='cuda_time_total', row_limit=10))
 print(minimal_matmul.cpu())
 print(manual_result.cpu())
 print(minimal_matmul.shape)

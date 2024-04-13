@@ -74,12 +74,12 @@ bool verify_result(float *gpu_result, float *cpu_result, int size) {
 
 int main(int argc, char *argv[]) {
     // Parse command-line arguments
-    if (argc != 3) {
-        std::cerr << "Usage: " << argv[0] << " <num_rows> <num_cols>" << std::endl;
-        return 1;
-    }
-    const int rows = std::stoi(argv[1]);
-    const int cols = std::stoi(argv[2]);
+//    if (argc != 3) {
+ //       std::cerr << "Usage: " << argv[0] << " <num_rows> <num_cols>" << std::endl;
+   //     return 1;
+    //}
+    const int rows = 8192;//std::stoi(argv[1]);
+    const int cols = 8192;//std::stoi(argv[2]);
     const int size = rows * cols * sizeof(float);
     const int coarsening_factor = 8; // You can adjust this value as needed
 

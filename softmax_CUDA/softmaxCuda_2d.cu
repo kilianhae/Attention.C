@@ -3,6 +3,27 @@
 #include <cstdlib>
 #include <cuda_runtime.h>
 
+/*
+__global__ void softmax2D_kernel(float *input, float *output, int rows, int cols) {
+    int idx = threadIdx.x + blockIdx.x * blockDim.x;
+    if (idx < rows) {
+        // Find max value in the row
+        float max_val = input[idx * cols];
+        float sum_exp = 0.0f;
+        for (int i = 0; i < cols; ++i) {
+            max_val = fmaxf(max_val, input[idx * cols + i]);
+            sum_exp += expf(input[idx * cols + i] - max_val);
+        }
+
+        // Calculate softmax for each element in the row
+        for (int i = 0; i < cols; ++i) {
+            output[idx * cols + i] = expf(input[idx * cols + i] - max_val) / sum_exp;
+        }
+    }
+}
+*/
+
+
 __global__ void softmax2D_kernel(float *d_in, float *d_out, int M, int N) {
     int row = blockIdx.y * blockDim.y + threadIdx.y;
     int col = blockIdx.x * blockDim.x + threadIdx.x;
@@ -48,12 +69,9 @@ void softmax2D_cpu(float *d_in, float *d_out, int M, int N) {
 
 int main(int argc, char *argv[]) {
     // Parse command-line arguments
-    if (argc != 3) {
-        std::cerr << "Usage: " << argv[0] << " <num_rows> <num_cols>" << std::endl;
-        return 1;
-    }
-    const int M = std::stoi(argv[1]);
-    const int N = std::stoi(argv[2]);
+    
+    const int M = 8192;//std::stoi(argv[1]);
+    const int N = 8192;//std::stoi(argv[2]);
 
     // Allocate memory on host
     float *input_host = (float*)malloc(M * N * sizeof(float));

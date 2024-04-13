@@ -629,6 +629,9 @@ void run_sgemm_cublas_batched(float* A, float* B, float* C, int M, int N, int K,
     cudaError_t cudaStat;  // cudaMalloc status
     cublasStatus_t stat;   // cuBLAS functions status
     cublasHandle_t handle;
+    M=4096;
+    N=4096;
+    K=64;
 
     stat = cublasCreate(&handle);
     const float alpha = 1.0;
@@ -675,8 +678,8 @@ void run_sgemm_cublas_batched(float* A, float* B, float* C, int M, int N, int K,
       double start, end;
       start = getTimeStamp();
       cudaDeviceSynchronize();
-    stat = cublasSgemmBatched(handle, CUBLAS_OP_N, CUBLAS_OP_N, M, N, K, &alpha, Barray_d, M, Aarray_d, K, &beta, Carray_d, M, BB*H);
-    cudaDeviceSynchronize();
+      stat = cublasSgemmBatched(handle, CUBLAS_OP_N, CUBLAS_OP_N, M, N, K, &alpha, Barray_d, M, Aarray_d, K, &beta, Carray_d, M, 8);
+      cudaDeviceSynchronize();
       end = getTimeStamp();
       printf("Time taken for batched cublas: %f\n", end-start);}
 }
@@ -792,8 +795,9 @@ void run_sgemm_blocktiling_batched(float* A, float* B, float* C, int M, int N, i
 
 
 int main(){
-    int N = 4096; // number of rows in dataset
-    int M = 4096; // number of columns in dataset
+
+    int N = 8192; // number of rows in dataset
+    int M = 8192; // number of columns in dataset
     int K = 64;
     // A is N*K, B is K*M
     std::vector<float> A(BB * H * N * K,1.0);
@@ -816,12 +820,18 @@ int main(){
 
     double start, end;
     start = getTimeStamp();
-
-
+    // std::cout << "Starting\n ";
+    // run_sgemm_naive_batched(d_A,d_B,d_C,M,N,K);
+    // run_sgemm_coalesced_batched(d_A,d_B,d_C,M,N,K);
+    // run_sgemm_coalesced_tiled_batched(d_A,d_B,d_C,M,N,K);
+    // run_sgemm_blocktiling_batched(d_A,d_B,d_C,M,N,K);
+    run_sgemm_cublas_batched(d_A,d_B,d_C,M,N,K,false);
     //run_sgemm_cublas(d_A,d_B,d_C,M,N,K,false);
     //run_sgemm_cublas(d_A,d_B,d_C,M,N,K,true);
-    run_sgemm_cublas_batched(d_A,d_B,d_C,M,N,K,false);
-    //run_sgemm_coalesced(d_A,d_B,d_C,M,N,K);
+//	run_sgemm_coalesced_tiled_batched(d_A,d_B,d_C,M,N,K);
+// run_sgemm_cublas_batched(d_A,d_B,d_C,M,N,K,false);
+//run_sgemm_blocktiling_batched(d_A,d_B, d_C,M,N,K); 
+//run_sgemm_coalesced(d_A,d_B,d_C,M,N,K);
     //(run_sgemm_blocktiling_batched(d_A,d_B,d_C,M,N,K);
     cudaDeviceSynchronize();
     end = getTimeStamp();
@@ -834,7 +844,7 @@ int main(){
     cudaFree(d_B);
     cudaFree(d_C);
 
-    // print C
+    // prt C
     // for (int i = 0; i < N; i++){
     //     for (int j = 0; j < M; j++){
     //         std::cout << C[i*M+j] << " ";

@@ -2,10 +2,13 @@
 #include <stdlib.h>
 #include <sys/time.h>
 #include <cublas_v2.h>
+#include <algorithm>
 
 #define TILE_DIM 32
 #define BLOCK_ROWS 8
 #define BLOCK_DIM 32
+#define BB 1
+#define H 8
 
 #define gpuErrchk(ans) { gpuAssert((ans), __FILE__, __LINE__); }
 inline void gpuAssert(cudaError_t code, const char *file, int line, bool abort=true) {
@@ -101,7 +104,7 @@ __global__ void transposeNaive(float *d_A, float *d_T, int M, int N) {
 	}
 }
 
-__global__ void transposeSharedMem(float *d_A, float *d_T, int M, int N) {
+__global__ void transposeCoalesced(float *d_A, float *d_T, int M, int N) {
 	__shared__ float tile[TILE_DIM][TILE_DIM+1];
 	
 	unsigned int row = blockIdx.y * TILE_DIM + threadIdx.y;
@@ -122,9 +125,6 @@ __global__ void transposeSharedMem(float *d_A, float *d_T, int M, int N) {
 	}
 }
 
-
-
-
 void run_transpose_cublas(float *A, float *C, int M,int N) {
     cudaError_t cudaStat;  // cudaMalloc status
     cublasStatus_t stat;  // cuBLAS functions status
@@ -135,40 +135,39 @@ void run_transpose_cublas(float *A, float *C, int M,int N) {
     const float beta = 0.0;
 
     // loop over batchsize and head
-    for (int i = 0; i < 1; i++) {
-        for (int j = 0; j < 1; j++) {
+    for (int i = 0; i < BB; i++) {
+        for (int j = 0; j < H; j++) {
             // get the i-th batch and j-th head
-            float* Aij = A;
-            float* Cij = C;
+            // float* Aij = A;
+            // float* Cij = C;
+            float* Aij = &A[i * H * M * N + j * M * N];
+            float* Cij = &C[i * H * N * M + j * N * M];
 
             // perform matrix transposition using cublasSgeam
             stat = cublasSgeam(handle,
                                CUBLAS_OP_T,  // transpose A
                                CUBLAS_OP_N,  // do not transpose B (NULL)
-                               N,  // number of rows of A^T
-                               M,  // number of columns of A^T
+                               M,  // number of rows of A^T
+                               N,  // number of columns of A^T
                                &alpha,
                                Aij,  // pointer to A
                                N,  // leading dimension of A
                                &beta,
-                               NULL,  // B is NULL
-                               N,  // set ldb to a valid value
+                               Aij,  // B is NULL
+                               M,  // set ldb to a valid value
                                Cij,  // pointer to C
-                               N);  // leading dimension of C
+                               M);  // leading dimension of C
         }
     }
     cublasDestroy(handle);
 }
 
-
-
-
 int main(int argc, char *argv[]) {
     // Set matrix size
     // int M = atoi(argv[1]);
     // int N = atoi(argv[2]);
-    int M = 4096;
-    int N = 64;
+    int M = 8192;
+    int N = 8192;
     if (M <= 0 || N <= 0) return 0;
     size_t bytes = M * N * sizeof(float);
 
@@ -192,17 +191,14 @@ int main(int argc, char *argv[]) {
     
 
 	// copy host data to device
-    
 	gpuErrchk(cudaMemcpy(d_A, h_A, bytes, cudaMemcpyHostToDevice));
 
-    
-	// launch kernel instance
 	dim3 blockDim(BLOCK_DIM, BLOCK_DIM);
 	dim3 gridDim((N + blockDim.x - 1)/blockDim.x, (M + blockDim.y - 1)/blockDim.y);
 
     double start_total_GPU = timeStamp();
 	//transposeNaive<<<gridDim, blockDim>>>(d_A, d_T, M, N);
-	//transposeSharedMem<<<gridDim, blockDim>>>(d_A, d_T, M, N);
+	//transposeCoalesced<<<gridDim, blockDim>>>(d_A, d_T, M, N);
     run_transpose_cublas(d_A, d_T, M, N);
     
     cudaDeviceSynchronize();

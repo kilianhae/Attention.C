@@ -64,21 +64,10 @@ void softmax_cudnn_cpu(float *input, float *output, int num_samples, int num_cla
     }
 }
 
-<<<<<<< HEAD
 int main() {
     // Define input dimensions
     const int num_samples = 8192;
     const int num_classes = 8192;
-=======
-int main(int argc, char *argv[]) {
-    // Parse command-line arguments
-    if (argc != 3) {
-        std::cerr << "Usage: " << argv[0] << " <num_samples> <num_classes>" << std::endl;
-        return 1;
-    }
-    const int num_samples = std::stoi(argv[1]);
-    const int num_classes = std::stoi(argv[2]);
->>>>>>> b78385d6770a9bef40d7ea46acdc7ed3fa8f7cd3
 
     // Generate random input
     std::vector<float> input(num_samples * num_classes);

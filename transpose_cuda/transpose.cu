@@ -244,16 +244,17 @@ torch::Tensor forward(torch::Tensor A) {
     auto A_data = A.data_ptr<float>();
     auto C_data = C.data_ptr<float>();
 
-	// dim3 blockDim(8,32); // each thread will process 4 cosnecutive 
-	// dim3 gridDim((N + 32 - 1)/32, (M + 32 - 1)/32);
-    dim3 blockDim(BLOCK_DIM, BLOCK_DIM); // each thread will process 4 cosnecutive 
-	dim3 gridDim((N + BLOCK_DIM - 1)/BLOCK_DIM, (M + BLOCK_DIM - 1)/BLOCK_DIM);
+	dim3 blockDim(8,32); // each thread will process 4 cosnecutive 
+	dim3 gridDim((N + 32 - 1)/32, (M + 32 - 1)/32);
+    // dim3 blockDim(BLOCK_DIM, BLOCK_DIM); // each thread will process 4 cosnecutive 
+	// dim3 gridDim((N + BLOCK_DIM - 1)/BLOCK_DIM, (M + BLOCK_DIM - 1)/BLOCK_DIM);
 
    
     //transposeNaive<<<gridDim, blockDim>>>(A_data, C_data, M, N);
     //transposeSharedMem<<<gridDim, blockDim>>>(A_data, C_data, M, N);
+    copySharedMem_coalesced<<<gridDim, blockDim>>>(A_data, C_data, M, N);
     //copySharedMem<<<gridDim, blockDim>>>(A_data, C_data, M, N);
-    run_transpose_cublas(A, C);
+    // run_transpose_cublas(A, C);
     cudaDeviceSynchronize();
     end = timeStamp();
 

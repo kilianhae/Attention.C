@@ -1,4 +1,4 @@
-//#include <torch/types.h>
+#include <torch/types.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <cuda.h>
@@ -13,7 +13,7 @@
 #include <cstdlib>
 #include <cublas_v2.h>
 #include <cuda_runtime.h>
-// #include <cudnn.h>
+ #include <cudnn.h>
 
 #define CEIL_DIV(M, N) (((M) + (N)-1) / (N))
 #define H 8
@@ -24,7 +24,7 @@ const int TILE_DIM_Y = 32;  // Tile dimension for rows
 const int TILE_DIM_X = 32;  // Tile dimension for columns// must be 32 for this method
 const int BLOCK_SIZE = 32;
 
-
+/*
 #include <iostream>
 #include <math.h>
 __global__ void softmax_kernel_coalesced_coarsened(float *input, float *output, int rows, int cols, int coarsening_factor) {
@@ -177,7 +177,7 @@ __global__ void softmax_kernel_naive_batched(float *input, float *output, int ba
     }
 }
 
-
+*/
 void softmax_cudnn(float *input, float *output, int num_samples, int num_classes) {
     // Set up cuDNN
     cudnnHandle_t cudnn;
@@ -199,7 +199,7 @@ void softmax_cudnn(float *input, float *output, int num_samples, int num_classes
     cudnnDestroyTensorDescriptor(output_desc);
     cudnnDestroy(cudnn);
 }
-
+/*
 void run_softmax_naive(float* A, float* C, int M, int N){
     //const int seq_len = A.size(2);
     //const int head_embd = A.size(3);
@@ -214,8 +214,8 @@ void run_softmax_naive(float* A, float* C, int M, int N){
         for (int j = 0; j <H); j++) {
             // get the i-th batch and j-th head
 
-		float* Cij = &C[i*H*K*N+j*K*N]
-		float* Aij = &A[i*H*K*N+j*K*N]
+		float* Cij = &C[i*H*K*N+j*K*N];
+		float* Aij = &A[i*H*K*N+j*K*N];
 
 //            torch::Tensor Aij = A[i][j];
 //            torch::Tensor Cij = C[i][j];
@@ -247,8 +247,8 @@ void run_softmax_batched_naive(torch::Tensor A, torch::Tensor C){
     softmax_kernel_naive_batched<<<blocksPerGrid, threadsperblock>>>(A_data, C_data, batch_size, n_head, seq_len, head_embd);
 
 
-}
-/*
+}*/
+
 void run_softmax_cuDNN(torch::Tensor A, torch::Tensor C){
     const int seq_len = A.size(2);
     const int head_embd = A.size(3);
@@ -259,8 +259,8 @@ void run_softmax_cuDNN(torch::Tensor A, torch::Tensor C){
     dim3 gridDim(ceil((M + blockDim.x - 1) / (float)blockDim.x), ceil((N + blockDim.y - 1) / (float)blockDim.y));
 
     // loop over batchsize and head
-    for (int i = 0; i < BB; i++) {
-        for (int j = 0; j < H; j++) {
+    for (int i = 0; i < A.size(0); i++) {
+        for (int j = 0; j < A.size(1); j++) {
             // get the i-th batch and j-th head
             torch::Tensor Aij = A[i][j];
             torch::Tensor Cij = C[i][j];
@@ -275,8 +275,8 @@ void run_softmax_cuDNN(torch::Tensor A, torch::Tensor C){
     }
 
 }
-*/
 
+/*
 void run_softmax_thread_coarse(torch::Tensor A, torch::Tensor C){
     const int seq_len = A.size(2);
     const int head_embd = A.size(3);
@@ -303,7 +303,6 @@ void run_softmax_thread_coarse(torch::Tensor A, torch::Tensor C){
     }
 
 }
-
 void run_softmax_optimized(torch::Tensor A, torch::Tensor C){
     const int seq_len = A.size(2);
     const int head_embd = A.size(3);
@@ -328,10 +327,10 @@ void run_softmax_optimized(torch::Tensor A, torch::Tensor C){
     }
     cudaFree(d_sums);
 }
-
+*/
 /*************************************************************************** Invocations*********************************************************/
 
-/*
+
 torch::Tensor forward(torch::Tensor A) {
     const int batch_size = A.size(0);
     const int n_head = A.size(1);
@@ -339,23 +338,26 @@ torch::Tensor forward(torch::Tensor A) {
     const int head_embd = A.size(3);
     const int M = seq_len;
     const int N = head_embd;
-    double start, end;
-    start = getTimeStamp();
+//    double start, end;
+//    start = getTimeStamp();
     torch::Tensor C = torch::zeros({batch_size, n_head, M, N}, A.options().device(torch::kCUDA));
-    
-    run_softmax_optimized(A,C);
 
-    //softmax_kernel_naive<<<gridDim, blockDim>>>(A_data, C_data, M, N, softmax_scale);
+//    run_softmax_optimized(A,C);
+//auto A_data = A.data_ptr<float>();
+    //auto C_data = C.data_ptr<float>();
+            softmax_cudnn(A,C);
+
+   //softmax_kernel_naive<<<gridDim, blockDim>>>(A_data, C_data, M, N, softmax_scale);
     cudaDeviceSynchronize();
     //cudaFree(d_sums);
 
-    end = getTimeStamp();
-    printf("Time taken: %lf\n", (end-start));
+//    end = getTimeStamp();
+//    printf("Time taken: %lf\n", (end-start));
     return C;
 }
 
 
-*/
+/*
 
 int main(){
 int M = 4096; // number of rows in dataset
@@ -392,3 +394,4 @@ int M = 4096; // number of rows in dataset
 
 
 }
+*/
