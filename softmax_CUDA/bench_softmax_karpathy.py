@@ -5,7 +5,7 @@ from torch.nn import functional as F
 from torch.utils.cpp_extension import load
 
 # Load the CUDA kernel as a python module
-minimal_softmax = load(name='softmaxCuda_optimized_warp_shuffle', sources=['main.cpp', 'softmaxCuda_optimized_warp_shuffle.cu'], extra_cuda_cflags=['-O2'])
+minimal_softmax = load(name='karpathy', sources=['main.cpp', 'karpathy.cu'], extra_cuda_cflags=['-O2'])
 
 # Use small model params, otherwise slower than manual attention. See caveats in README.
 # batch_size = 16
