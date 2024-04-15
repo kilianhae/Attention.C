@@ -1,21 +1,16 @@
+#include <torch/types.h>
 #include <cuda.h>
 #include <cuda_runtime.h>
 #include <sys/time.h>
-#include <iostream>
-#include <random>
+
 #include <algorithm>
 #include <cassert>
 #include <cstdio>
 #include <cstdlib>
-
 #include <cublas_v2.h>
+#include <cuda_runtime.h>
 
 #define CEIL_DIV(M, N) (((M) + (N)-1) / (N))
-
-#define H 8
-#define BB 1
-#define BLKS 32
-
 
 #define BM 64
 #define BN 64
@@ -31,18 +26,6 @@ double getTimeStamp() {
     struct timeval tv;
     gettimeofday( &tv, NULL );
     return (double) tv.tv_usec/1000000 + tv.tv_sec;
-}
-
-
-template <typename T>
-void randomInit(std::vector<T> &x) {
-    // Pseudo-random float vector
-    std::random_device rd;
-    std::mt19937 gen(rd());
-    std::uniform_real_distribution<> unif(-1, 1);
-    for (int i = 0; i < x.size(); i++) {
-        x[i] = unif(gen);
-    }
 }
 
 
@@ -188,7 +171,6 @@ __global__ void sgemm_naive_coalesced_tiled(int M, int N, int K, float *A,
         else{
             Bs[ty][tx] = 0;
         }
-        
         __syncthreads();
         for(int j=0;j<blocksize;j++) {
             val += As[ty][j]*Bs[j][tx];
@@ -198,64 +180,9 @@ __global__ void sgemm_naive_coalesced_tiled(int M, int N, int K, float *A,
     C[y*N+x] = val;
 }
 
-
-__global__ void sgemm_naive_coalesced_tiled_batched(int L, int M, int N, int K, float *A,
-                            float *B, float *C) {
-    // this kernel uses x as the col index and y as the row index (which leads to better coalescing) and a decent speedup
-    // compute position in C that this thread is responsible for
-    const uint x = blockIdx.x * blockDim.x + threadIdx.x;
-    const uint y = blockIdx.y * blockDim.y + threadIdx.y;
-    const uint batch = blockIdx.z * blockDim.z + threadIdx.z;
-
-    const uint offset_A = batch * M * K;
-    const uint offset_B = batch * K * N;
-    const uint offset_C = batch * M * N;
-
-    if (batch >= L) {
-      return;
-    }
-
-    const uint tx = threadIdx.x;
-    const uint ty = threadIdx.y;
-
-    const uint blocksize=blockDim.x;
-
-    assert(blocksize == tilesize);
-
-    __shared__ float As[tilesize][tilesize];
-    __shared__ float Bs[tilesize][tilesize];
-
-    float val = 0.0;
-    // loop over phases of tiling 
-    for(int i=0;i<K;i+=blocksize) {
-        //load to shared mem
-        
-        if (y<M && i+tx<K){
-
-            As[ty][tx] = A[offset_A+y*K+i+tx];
-        }
-        else{
-            As[ty][tx] = 0;
-        }
-        if (x<N && i+ty<K){
-            Bs[ty][tx] = B[offset_B+(i+ty)*N+x];
-        }
-        else{
-            Bs[ty][tx] = 0;
-        }
-        
-        __syncthreads();
-        for(int j=0;j<blocksize;j++) {
-            val += As[ty][j]*Bs[j][tx];
-        }
-        __syncthreads();
-    }
-    C[offset_C+y*N+x] = val;
-}
-
-
-__global__ void __launch_bounds__((BM * BN) / (TM * TN), 1) 
-sgemm2DBlocktiling(int M, int N, int K, const float *A, const float *B,float *C) {
+__global__ void __launch_bounds__((BM * BN) / (TM * TN), 1)
+    sgemm2DBlocktiling(int M, int N, int K, const float *A,
+                       const float *B,float *C) {
   // This kernel is taken from the amazing Matmul guide from Simon Boehm: https://siboehm.com/articles/22/CUDA-MMM
   const uint cRow = blockIdx.y;
   const uint cCol = blockIdx.x;
@@ -333,6 +260,8 @@ sgemm2DBlocktiling(int M, int N, int K, const float *A, const float *B,float *C)
         }
       }
     }
+    //a =     regM[2];
+    //printf("a: %f\n", a);
     __syncthreads();
   }
 
@@ -349,8 +278,10 @@ sgemm2DBlocktiling(int M, int N, int K, const float *A, const float *B,float *C)
 __global__ void __launch_bounds__((BM * BN) / (TM * TN), 1)
     sgemm2DBlocktiling_batched(int L, int M, int N, int K, const float *A,
                        const float *B,float *C) {
+                        
   const uint cRow = blockIdx.y;
   const uint cCol = blockIdx.x;
+
   
   const uint batch = blockIdx.z * blockDim.z + threadIdx.z;
 
@@ -436,6 +367,8 @@ __global__ void __launch_bounds__((BM * BN) / (TM * TN), 1)
         }
       }
     }
+    //a =     regM[2];
+    //printf("a: %f\n", a);
     __syncthreads();
   }
 
@@ -448,7 +381,7 @@ __global__ void __launch_bounds__((BM * BN) / (TM * TN), 1)
   }
 }
 
-void run_sgemm_cublas(float* A, float* B, float* C, int M, int N, int K, bool transpose){
+void run_sgemm_cublas(torch::Tensor A, torch::Tensor B, torch::Tensor C, bool transpose){
 
     cudaError_t cudaStat;  // cudaMalloc status
     cublasStatus_t stat;   // cuBLAS functions status
@@ -458,33 +391,30 @@ void run_sgemm_cublas(float* A, float* B, float* C, int M, int N, int K, bool tr
     const float alpha = 1.0;
     const float beta = 0.0;
     // loop over batchsize and head
-    for (int i = 0; i < BB; i++) {
-        for (int j = 0; j < H; j++) {
+    for (int i = 0; i < A.size(0); i++) {
+        for (int j = 0; j < A.size(1); j++) {
             // get the i-th batch and j-th head
-            float* Aij = &A[i*H*K*N+j*K*N];
-            float* Bij = &B[i*H*K*N+j*K*N];
-            float* Cij = &C[i*H*K*N+j*K*N];
+            torch::Tensor Aij = A[i][j];
+            torch::Tensor Bij = B[i][j];
+            torch::Tensor Cij = C[i][j];
             // compute the matrix multiplication
             // cublas expects A to be m x k, B to be k x n, and C to be m x n
             // BUT in col major layout
             if(transpose){
-                stat = cublasSgemm(handle, CUBLAS_OP_T, CUBLAS_OP_N, K, N, M, &alpha, Bij, M, Aij, K, &beta, Cij,K);
+                stat = cublasSgemm(handle, CUBLAS_OP_T, CUBLAS_OP_N, B.size(2), A.size(2), B.size(3), &alpha, Bij.data_ptr<float>(), B.size(3), Aij.data_ptr<float>(), A.size(3), &beta, Cij.data_ptr<float>(),B.size(2));
             }
             else{
-            stat = cublasSgemm(handle, CUBLAS_OP_N, CUBLAS_OP_N, M, N, K, &alpha, Bij, M, Aij, K, &beta, Cij,M);
+            stat = cublasSgemm(handle, CUBLAS_OP_N, CUBLAS_OP_N, B.size(3), A.size(2), B.size(2), &alpha, Bij.data_ptr<float>(), B.size(3), Aij.data_ptr<float>(), A.size(3), &beta, Cij.data_ptr<float>(),B.size(3));
             // allocate memory for output on GPU in cuda
             }
         }
     }
 }
 
-void run_sgemm_cublas_batched(float* A, float* B, float* C, int M, int N, int K, bool transpose){
+void run_sgemm_cublas_batched(torch::Tensor A, torch::Tensor B, torch::Tensor C, bool transpose){
     cudaError_t cudaStat;  // cudaMalloc status
     cublasStatus_t stat;   // cuBLAS functions status
     cublasHandle_t handle;
-    M=4096;
-    N=4096;
-    K=64;
 
     stat = cublasCreate(&handle);
     const float alpha = 1.0;
@@ -494,15 +424,15 @@ void run_sgemm_cublas_batched(float* A, float* B, float* C, int M, int N, int K,
     // make array of pointers of elelments of B with stride of K*N
     // make array of pointers of elelments of C with stride of M*N
 
-    float *Aarray[BB*H];
-    float *Barray[BB*H];
-    float *Carray[BB*H];
+    float *Aarray[A.size(0)*A.size(1)];
+    float *Barray[A.size(0)*A.size(1)];
+    float *Carray[A.size(0)*A.size(1)];
 
-    for (int i = 0; i < BB; i++) {
-        for (int j = 0; j < H; j++) {
-            Aarray[i*H+j] = &A[i*H*K*N+j*K*N];
-            Barray[i*H+j] = &B[i*H*K*N+j*K*N];
-            Carray[i*H+j] = &C[i*H*K*N+j*K*N];
+    for (int i = 0; i < A.size(0); i++) {
+        for (int j = 0; j < A.size(1); j++) {
+            Aarray[i*A.size(1)+j] = A[i][j].data_ptr<float>();
+            Barray[i*B.size(1)+j] = B[i][j].data_ptr<float>();
+            Carray[i*C.size(1)+j] = C[i][j].data_ptr<float>();
         }
     }
 
@@ -510,183 +440,167 @@ void run_sgemm_cublas_batched(float* A, float* B, float* C, int M, int N, int K,
     float **Aarray_d;
     float **Barray_d;
     float **Carray_d;
-    cudaMalloc((void**)&Aarray_d, BB*H*sizeof(float*));
-    cudaMalloc((void**)&Barray_d, BB*H*sizeof(float*));
-    cudaMalloc((void**)&Carray_d, BB*H*sizeof(float*));
+    cudaMalloc((void**)&Aarray_d, A.size(0)*A.size(1)*sizeof(float*));
+    cudaMalloc((void**)&Barray_d, A.size(0)*A.size(1)*sizeof(float*));
+    cudaMalloc((void**)&Carray_d, A.size(0)*A.size(1)*sizeof(float*));
 
-    cudaMemcpy(Aarray_d, Aarray, BB*H*sizeof(float*), cudaMemcpyHostToDevice);
-    cudaMemcpy(Barray_d, Barray, BB*H*sizeof(float*), cudaMemcpyHostToDevice);
-    cudaMemcpy(Carray_d, Carray, BB*H*sizeof(float*), cudaMemcpyHostToDevice);
+    cudaMemcpy(Aarray_d, Aarray, A.size(0)*A.size(1)*sizeof(float*), cudaMemcpyHostToDevice);
+    cudaMemcpy(Barray_d, Barray, A.size(0)*A.size(1)*sizeof(float*), cudaMemcpyHostToDevice);
+    cudaMemcpy(Carray_d, Carray, A.size(0)*A.size(1)*sizeof(float*), cudaMemcpyHostToDevice);
     if(transpose){
-      //stat = cublasSgemmBatched(handle, CUBLAS_OP_T, CUBLAS_OP_N, 3000, 3000, 4000, &alpha, Barray_d, 4000, Aarray_d, 4000, &beta, Carray_d, 3000, BB*H);
+      //stat = cublasSgemmBatched(handle, CUBLAS_OP_T, CUBLAS_OP_N, 3000, 3000, 4000, &alpha, Barray_d, 4000, Aarray_d, 4000, &beta, Carray_d, 3000, B.size(0)*B.size(1));
       double start, end;
       start = getTimeStamp();
       cudaDeviceSynchronize();
-      stat = cublasSgemmBatched(handle, CUBLAS_OP_T, CUBLAS_OP_N, M, N, K, &alpha, Barray_d, K , Aarray_d, K, &beta, Carray_d, M, BB*H);
+      stat = cublasSgemmBatched(handle, CUBLAS_OP_T, CUBLAS_OP_N, B.size(2), A.size(2), B.size(3), &alpha, Barray_d, B.size(3) , Aarray_d, A.size(3), &beta, Carray_d, B.size(2), B.size(0)*B.size(1));
       cudaDeviceSynchronize();
       end = getTimeStamp();
-      printf("Time taken for batched cublas: %f\n", end-start);
+        printf("Time taken: %f\n", end-start);
     }
     else{
       double start, end;
       start = getTimeStamp();
       cudaDeviceSynchronize();
-      stat = cublasSgemmBatched(handle, CUBLAS_OP_N, CUBLAS_OP_N, M, N, K, &alpha, Barray_d, M, Aarray_d, K, &beta, Carray_d, M, 8);
-      cudaDeviceSynchronize();
+    stat = cublasSgemmBatched(handle, CUBLAS_OP_N, CUBLAS_OP_N, B.size(3), A.size(2), B.size(2), &alpha, Barray_d, B.size(3), Aarray_d, A.size(3), &beta, Carray_d, B.size(3), B.size(0)*B.size(1));
+    cudaDeviceSynchronize();
       end = getTimeStamp();
-      printf("Time taken for batched cublas: %f\n", end-start);}
+      printf("Time taken: %f\n", end-start);}
 }
 
-void run_sgemm_naive(float* A, float* B, float* C, int M, int N, int K){
-    dim3 gridDim(CEIL_DIV(M, BLKS), CEIL_DIV(N, BLKS));
-    dim3 blockDim(BLKS,BLKS);
+void run_sgemm_naive(torch::Tensor A, torch::Tensor B, torch::Tensor C){
+    dim3 gridDim(CEIL_DIV(B.size(3), 32), CEIL_DIV(A.size(2), 32));
+    dim3 blockDim(32,32);
 
     // loop over batchsize and head
-    for (int i = 0; i < BB; i++) {
-        for (int j = 0; j < H; j++) {
+    for (int i = 0; i < A.size(0); i++) {
+        for (int j = 0; j < A.size(1); j++) {
             // get the i-th batch and j-th head
-            float* Aij = &A[i*H*K*N+j*K*N];
-            float* Bij = &B[i*H*K*N+j*K*N];
-            float* Cij = &C[i*H*K*N+j*K*N];
+            torch::Tensor Aij = A[i][j];
+            torch::Tensor Bij = B[i][j];
+            torch::Tensor Cij = C[i][j];
             // compute the matrix multiplication
-            sgemm_naive<<<gridDim, blockDim>>>(N, M, K, Aij, Bij, Cij);
+            sgemm_naive<<<gridDim, blockDim>>>(A.size(2), B.size(3), A.size(3), Aij.data_ptr<float>(), Bij.data_ptr<float>(), Cij.data_ptr<float>());
             // allocate memory for output on GPU in cuda
         }
     }
 
 }
 
-void run_sgemm_naive_batched(float* A, float* B, float* C, int M, int N, int K){
+void run_sgemm_naive_batched(torch::Tensor A, torch::Tensor B, torch::Tensor C){
     
-    dim3 gridDim(CEIL_DIV(M, BLKS), CEIL_DIV(N, BLKS), CEIL_DIV(BB*H, BD));
-    dim3 blockDim(BLKS,BLKS,BD);
-    int L = BB*H;
-    sgemm_naive_batched<<<gridDim, blockDim>>>(L, N, M, K, A, B, C);
+    dim3 gridDim(CEIL_DIV(B.size(3), 32), CEIL_DIV(A.size(2), 32), CEIL_DIV(A.size(0)*A.size(1), BD));
+    dim3 blockDim(32,32,BD);
+    int L = A.size(0)*A.size(1);
+    sgemm_naive_batched<<<gridDim, blockDim>>>(L, A.size(2), B.size(3), A.size(3), A.data_ptr<float>(), B.data_ptr<float>(), C.data_ptr<float>());
     return;
 
 }
 
-void run_sgemm_coalesced(float* A, float* B, float* C, int M, int N, int K){
-    dim3 gridDim(CEIL_DIV(M, BLKS), CEIL_DIV(N, BLKS));
-    dim3 blockDim(BLKS,BLKS);
+void run_sgemm_coalesced(torch::Tensor A, torch::Tensor B, torch::Tensor C){
+    dim3 gridDim(CEIL_DIV(B.size(3), 32), CEIL_DIV(A.size(2), 32));
+    dim3 blockDim(32,32);
 
     // loop over batchsize and head
-    for (int i = 0; i < BB; i++) {
-        for (int j = 0; j < H; j++) {
+    for (int i = 0; i < A.size(0); i++) {
+        for (int j = 0; j < A.size(1); j++) {
             // get the i-th batch and j-th head
-            float* Aij = &A[i*H*K*N+j*K*N];
-            float* Bij = &B[i*H*K*N+j*K*N];
-            float* Cij = &C[i*H*K*N+j*K*N];
+            torch::Tensor Aij = A[i][j];
+            torch::Tensor Bij = B[i][j];
+            torch::Tensor Cij = C[i][j];
             // compute the matrix multiplication
-            sgemm_naive_coalesced<<<gridDim, blockDim>>>(N, M, K, Aij, Bij, Cij);
+            sgemm_naive_coalesced<<<gridDim, blockDim>>>(A.size(2), B.size(3), A.size(3), Aij.data_ptr<float>(), Bij.data_ptr<float>(), Cij.data_ptr<float>());
             // allocate memory for output on GPU in cuda
         }
     }
 }
 
-void run_sgemm_coalesced_batched(float* A, float* B, float* C, int M, int N, int K){
-    dim3 gridDim(CEIL_DIV(M, BLKS), CEIL_DIV(N, BLKS), CEIL_DIV(BB*H,BD));
-    dim3 blockDim(BLKS,BLKS,BD);
-    int L = BB*H;
-    sgemm_naive_coalesced_batched<<<gridDim, blockDim>>>(L, N, M, K, A, B, C);
+void run_sgemm_coalesced_batched(torch::Tensor A, torch::Tensor B, torch::Tensor C){
+    dim3 gridDim(CEIL_DIV(B.size(3), 32), CEIL_DIV(A.size(2), 32), CEIL_DIV(A.size(0)*A.size(1),BD));
+    dim3 blockDim(32,32,BD);
+    int L = A.size(0)*A.size(1);
+    sgemm_naive_coalesced_batched<<<gridDim, blockDim>>>(L, A.size(2), B.size(3), A.size(3), A.data_ptr<float>(), B.data_ptr<float>(), C.data_ptr<float>());
     return;
 
 }
 
-void run_sgemm_coalesced_tiled(float* A, float* B, float* C, int M, int N, int K){
-    dim3 gridDim(CEIL_DIV(M, BLKS), CEIL_DIV(N, BLKS));
-    dim3 blockDim(BLKS,BLKS);
+void run_sgemm_coalesced_tiled(torch::Tensor A, torch::Tensor B, torch::Tensor C){
+    dim3 gridDim(CEIL_DIV(B.size(3), 32), CEIL_DIV(A.size(2), 32));
+    dim3 blockDim(32,32);
 
     // loop over batchsize and head
-    for (int i = 0; i < BB; i++) {
-        for (int j = 0; j < H; j++) {
+    for (int i = 0; i < A.size(0); i++) {
+        for (int j = 0; j < A.size(1); j++) {
             // get the i-th batch and j-th head
-            float* Aij = &A[i*H*K*N+j*K*N];
-            float* Bij = &B[i*H*K*N+j*K*N];
-            float* Cij = &C[i*H*K*N+j*K*N];
+            torch::Tensor Aij = A[i][j];
+            torch::Tensor Bij = B[i][j];
+            torch::Tensor Cij = C[i][j];
             // compute the matrix multiplication
-            sgemm_naive_coalesced_tiled<<<gridDim, blockDim>>>(N, M, K, Aij, Bij, Cij);
+            sgemm_naive_coalesced_tiled<<<gridDim, blockDim>>>(A.size(2), B.size(3), A.size(3), Aij.data_ptr<float>(), Bij.data_ptr<float>(), Cij.data_ptr<float>());
             // allocate memory for output on GPU in cuda
         }
     }
 
 }
 
-void run_sgemm_coalesced_tiled_batched(float* A, float* B, float* C, int M, int N, int K){
-    dim3 gridDim(CEIL_DIV(M, BLKS), CEIL_DIV(N, BLKS), CEIL_DIV(BB*H,BD));
-    dim3 blockDim(BLKS,BLKS,BD);
-    int L = BB*H;
-    sgemm_naive_coalesced_tiled_batched<<<gridDim, blockDim>>>(L, N, M, K, A, B, C);
+void run_sgemm_coalesced_tiled_batched(torch::Tensor A, torch::Tensor B, torch::Tensor C){
+    dim3 gridDim(CEIL_DIV(B.size(3), 32), CEIL_DIV(A.size(2), 32), CEIL_DIV(A.size(0)*A.size(1),BD));
+    dim3 blockDim(32,32,BD);
+    int L = A.size(0)*A.size(1);
+    sgemm_naive_coalesced_tiled_batched<<<gridDim, blockDim>>>(L, A.size(2), B.size(3), A.size(3), A.data_ptr<float>(), B.data_ptr<float>(), C.data_ptr<float>());
     return;
+
 }
 
-void run_sgemm_blocktiling(float* A, float* B, float* C, int M, int N, int K){
-    dim3 gridDim(CEIL_DIV(M, BN), CEIL_DIV(N, BM));
+void run_sgemm_blocktiling(torch::Tensor A, torch::Tensor B, torch::Tensor C){
+    dim3 gridDim(CEIL_DIV(B.size(3), BN), CEIL_DIV(A.size(2), BM));
     dim3 blockDim(CEIL_DIV(BM * BN, (TM * TN)));
 
     // loop over batchsize and head
-    for (int i = 0; i < BB; i++) {
-        for (int j = 0; j < H; j++) {
+    for (int i = 0; i < A.size(0); i++) {
+        for (int j = 0; j < A.size(1); j++) {
             // get the i-th batch and j-th head
-            float* Aij = &A[i*H*K*N+j*K*N];
-            float* Bij = &B[i*H*K*N+j*K*N];
-            float* Cij = &C[i*H*K*N+j*K*N];
+            torch::Tensor Aij = A[i][j];
+            torch::Tensor Bij = B[i][j];
+            torch::Tensor Cij = C[i][j];
             // compute the matrix multiplication
-            sgemm2DBlocktiling<<<gridDim, blockDim>>>(N, M, K, Aij, Bij, Cij);
+            sgemm2DBlocktiling<<<gridDim, blockDim>>>(A.size(2), B.size(3), A.size(3), Aij.data_ptr<float>(), Bij.data_ptr<float>(), Cij.data_ptr<float>());
             // allocate memory for output on GPU in cuda
         }
     }
+
 }
 
-void run_sgemm_blocktiling_batched(float* A, float* B, float* C, int M, int N, int K){
-    dim3 gridDim(CEIL_DIV(M, BN), CEIL_DIV(N, BM), CEIL_DIV(BB*H,BD));
+void run_sgemm_blocktiling_batched(torch::Tensor A, torch::Tensor B, torch::Tensor C){
+    dim3 gridDim(CEIL_DIV(B.size(3), BN), CEIL_DIV(A.size(2), BM), CEIL_DIV(A.size(0)*A.size(1),BD));
     dim3 blockDim((BM * BN)/(TM * TN), BD);
-    int L = BB*H;
-    sgemm2DBlocktiling_batched<<<gridDim, blockDim>>>(L, N, M, K, A, B, C);
+    int L = A.size(0)*A.size(1);
+
+    double start, end;
+    start = getTimeStamp();
+
+    sgemm2DBlocktiling_batched<<<gridDim, blockDim>>>(L, A.size(2), B.size(3), A.size(3), A.data_ptr<float>(), B.data_ptr<float>(), C.data_ptr<float>());
+    cudaDeviceSynchronize();
+    end = getTimeStamp();
+    printf("Time taken short: %lf\n", (end-start));
     return;
     }
 
 
-int main(){
 
-    int N = 4096; // number of rows in dataset
-    int M = 4096; // number of columns in dataset
-    int K = 64;
-    // A is N*K, B is K*M
-    std::vector<float> A(BB * H * N * K,1.0);
-    std::vector<float> B(BB * H * K * M,1.0);
-    std::vector<float> C(BB * H * N * M,0.0);
-    randomInit(A);
-    randomInit(B);
-
-    float *d_A, *d_B, *d_C;
-
-    cudaMalloc(&d_A, BB * H * N * K * sizeof(float));
-    cudaMalloc(&d_B, BB * H * K * M * sizeof(float));
-    cudaMalloc(&d_C, BB * H * N * M * sizeof(float));
-    cudaMemset(d_C, 0, N*sizeof(float));
-
-    cudaMemcpy(d_A,  A.data(),  BB * H * N * K * sizeof(float), cudaMemcpyHostToDevice);
-    cudaMemcpy(d_B,  B.data(),  BB * H * K * M * sizeof(float), cudaMemcpyHostToDevice);
-    cudaDeviceSynchronize();
-
-
+torch::Tensor forward(torch::Tensor A, torch::Tensor B, bool transpose) {
     double start, end;
     start = getTimeStamp();
+    torch::Tensor C;
+    if (transpose){
+      C = torch::zeros({A.size(0), A.size(1), A.size(2), B.size(2)}, torch::kCUDA);
+    }
+    else {
+      C = torch::zeros({A.size(0), A.size(1), A.size(2), B.size(3)}, torch::kCUDA);
+      }
     
-    // select which kernel run fucntion to use
-    run_sgemm_cublas_batched(d_A,d_B,d_C,M,N,K,false);
-    
+    run_sgemm_cublas_batched(A, B, C, transpose);
     cudaDeviceSynchronize();
     end = getTimeStamp();
-    std::cout << "Time taken by naive kernel: " << end - start << std::endl;
-
-
-    cudaMemcpy(C.data(),d_C, BB * H * N * M * sizeof(float), cudaMemcpyDeviceToHost);
-    cudaDeviceSynchronize();
-    cudaFree(d_A);
-    cudaFree(d_B);
-    cudaFree(d_C);
-
-    return 0;
+    printf("Time taken: %lf\n", (end-start));
+    return C;
 }
