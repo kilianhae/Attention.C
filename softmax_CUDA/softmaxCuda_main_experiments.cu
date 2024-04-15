@@ -178,6 +178,14 @@ __global__ void softmax_kernel_naive_batched(float *input, float *output, int ba
 }
 
 */
+
+double getTimeStamp() {
+    struct timeval tv;
+    gettimeofday( &tv, NULL );
+    return (double) tv.tv_usec/1000000 + tv.tv_sec;
+}
+
+
 void softmax_cudnn(float *input, float *output, int num_samples, int num_classes) {
     // Set up cuDNN
     cudnnHandle_t cudnn;
@@ -192,8 +200,14 @@ void softmax_cudnn(float *input, float *output, int num_samples, int num_classes
     
     // Perform softmax operation
     float alpha = 1.0f, beta = 0.0f;
-    cudnnSoftmaxForward(cudnn, CUDNN_SOFTMAX_ACCURATE, CUDNN_SOFTMAX_MODE_INSTANCE, &alpha, input_desc, input, &beta, output_desc, output);
+    // measure time
+    double start, end;
+    start = getTimeStamp();
     
+    cudnnSoftmaxForward(cudnn, CUDNN_SOFTMAX_ACCURATE, CUDNN_SOFTMAX_MODE_INSTANCE, &alpha, input_desc, input, &beta, output_desc, output);
+    cudaDeviceSynchronize();
+    end = getTimeStamp();
+    printf("Time taken: %lf\n", (end-start));
     // Clean up
     cudnnDestroyTensorDescriptor(input_desc);
     cudnnDestroyTensorDescriptor(output_desc);
@@ -342,10 +356,10 @@ torch::Tensor forward(torch::Tensor A) {
 //    start = getTimeStamp();
     torch::Tensor C = torch::zeros({batch_size, n_head, M, N}, A.options().device(torch::kCUDA));
 
-//    run_softmax_optimized(A,C);
+    run_softmax_cuDNN(A,C);
 //auto A_data = A.data_ptr<float>();
     //auto C_data = C.data_ptr<float>();
-            softmax_cudnn(A,C);
+            //softmax_cudnn(A,C);
 
    //softmax_kernel_naive<<<gridDim, blockDim>>>(A_data, C_data, M, N, softmax_scale);
     cudaDeviceSynchronize();

@@ -66,8 +66,8 @@ void softmax_cudnn_cpu(float *input, float *output, int num_samples, int num_cla
 
 int main() {
     // Define input dimensions
-    const int num_samples = 8192;
-    const int num_classes = 8192;
+    const int num_samples = 10490;
+    const int num_classes = 10490;
 
     // Generate random input
     std::vector<float> input(num_samples * num_classes);

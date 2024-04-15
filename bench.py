@@ -20,7 +20,6 @@ v = torch.randn(batch_size, n_head, seq_len, head_embd).cuda()
 print('=== profiling manual attention ===')
 # set torch to not rtrack gradients
 with torch.no_grad():
-        
     # Our minimal flash attention aims to be faster than this by avoiding HBM read/writes of N^2 matrices.
     def manual_attn(q, k, v):
         att = (q @ k.transpose(-2, -1))
@@ -31,23 +30,10 @@ with torch.no_grad():
     with torch.autograd.profiler.profile(use_cuda=True) as prof:
         manual_result = manual_attn(q, k, v)
     print(prof.key_averages().table(sort_by='cuda_time_total', row_limit=10))
-    print(prof.key_averages().table(sort_by="cuda_time_total"))
 
     print('=== profiling minimal flash attention === ')
 
     with torch.autograd.profiler.profile(use_cuda=True) as prof:
-        # // assume rowmajor layout for all inputs
-        # // layout: softmax(QK^T)V // 
-        # // kernel nr 1: transpose
-        # transpose.forward(K)
-        # // kernel nr 2 matmul
-        # matmul.forward(Q, K^T)
-        # // divide by sqrt(d)
-        # sqrt.forward()
-        # // kernel nr 3: softmax
-        # softmax.forward(QK^T)
-        # // kernel nr 4: matmul
-        # matmul.forward()
         minimal_result = minimal_attn.forward(q, k, v, True)
     print(prof.key_averages().table(sort_by='cuda_time_total', row_limit=10))
 
